@@ -7,6 +7,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-23
+
+### Added
+
+- **`diagnostics()` answers before initialization.** It previously returned `nil` when nothing had
+  started — exactly the state an integrator reaches for it in — so a refused start looked identical
+  to never having called `initialize()`. It now reports the refusal reason in `configError`,
+  matching the field the web and Android SDKs gained in the same release.
+
+### Fixed
+
+- **The loopback exemption was a prefix match.** `http://localhost.evil.com` satisfied
+  `hasPrefix("http://localhost")` and was exempted from the HTTPS requirement despite being an
+  attacker-controlled host that is not loopback at all. The match is anchored now.
+
+### Internal
+
+- The `UserNotifications` surface is now covered by tests, and a `push-smoke` target drives a real
+  notification through `xcrun simctl push` on a simulator and asserts the SDK reported it. Three
+  tests that need an app host are deliberately absent: `UNUserNotificationCenter.current()` traps
+  with `bundleProxyForCurrentProcess is nil` in a SwiftPM test bundle, before any guard can run.
+  A simulator CI cannot be granted notification authorisation, so the smoke job reports that path
+  as explicitly skipped rather than passing it by omission.
+
+
 ## [1.0.0] — 2026-08-17
 
 Initial release: the iOS implementation of the Arsel wire contract, at parity with the Android and

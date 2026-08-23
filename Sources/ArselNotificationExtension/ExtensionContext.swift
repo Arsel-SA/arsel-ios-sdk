@@ -9,7 +9,7 @@ import FoundationNetworking
 /// Change one, change both (the authoritative contract is the Arsel API).
 enum ExtensionWire {
     /// Kept in lockstep with `Wire.sdkVersion` (see RELEASING.md).
-    static let sdkVersion = "1.0.0"
+    static let sdkVersion = "1.1.0"
     static let sdkHeader = "X-Arsel-SDK"
     static let sdkHeaderValue = "ios/\(sdkVersion)"
     static let deviceAuthHeader = "X-Arsel-Device-Auth"
