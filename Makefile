@@ -35,6 +35,29 @@ build:
 		-skipPackagePluginValidation \
 		CODE_SIGNING_ALLOWED=NO
 
+## Delivers a real push to the sample app on a booted simulator and asserts the SDK handled it.
+## `simctl push` bypasses APNs, so this needs no signing key, no device and no Apple membership.
+# -derivedDataPath is resolved relative to the `cd` in the recipe, so it is `.build`
+# and not $(SAMPLE_DIR)/.build — the latter nests as Examples/Sample/Examples/Sample
+# and leaves the install step below looking at a path that was never written.
+# Split from push-smoke so CI can run the script itself and see its real exit code: make
+# collapses every recipe failure to 2, which would erase the script's 78 "skipped".
+push-smoke-install: require-simulator
+	cd $(SAMPLE_DIR) && xcodegen generate
+	cd $(SAMPLE_DIR) && xcodebuild build \
+		-project $(SAMPLE_PROJ) \
+		-scheme $(SAMPLE_SCHEME) \
+		-configuration Debug-Staging \
+		-destination "platform=iOS Simulator,id=$(SIM_ID)" \
+		-derivedDataPath .build \
+		CODE_SIGNING_ALLOWED=NO
+	xcrun simctl boot $(SIM_ID) 2>/dev/null || true
+	xcrun simctl install $(SIM_ID) \
+		$(SAMPLE_DIR)/.build/Build/Products/Debug-Staging-iphonesimulator/ArselSample.app
+
+push-smoke: push-smoke-install
+	Scripts/push-smoke.sh
+
 ## The harness app, built the way an integrator builds it.
 sample:
 	cd $(SAMPLE_DIR) && xcodegen generate
@@ -63,4 +86,4 @@ define udid_for
 $(shell xcrun simctl list devices available '$(1)' | grep -E '$(2)' | tail -1 | awk -F '[()]' '{ print $$(NF-3) }')
 endef
 
-.PHONY: default test build sample require-simulator
+.PHONY: default test build sample push-smoke push-smoke-install require-simulator

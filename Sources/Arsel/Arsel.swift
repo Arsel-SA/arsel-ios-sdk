@@ -13,6 +13,9 @@ import Foundation
 public enum Arsel {
     static var core: ArselCore?
 
+    /// Why `initialize` declined to start, or nil. Surfaced via `diagnostics()`.
+    static var configError: String?
+
     /// Start the SDK. Idempotent — call once, early (e.g. from
     /// `application(_:didFinishLaunchingWithOptions:)`).
     ///
@@ -23,10 +26,13 @@ public enum Arsel {
         guard core == nil else { return }
         if let problem = config.validationError() {
             // Log-and-refuse, never throw: the SDK must not crash the host over
-            // configuration, but silence would be worse — this is loud on purpose.
+            // configuration, but silence would be worse — this is loud on purpose,
+            // and `diagnostics()` keeps the reason readable afterwards.
+            configError = problem
             print("[arsel] initialize() refused: \(problem)")
             return
         }
+        configError = nil
         let instance = ArselCore(config: config, directory: ArselCore.defaultDirectory())
         core = instance
         attachInAppPresenter(instance)
@@ -133,7 +139,26 @@ public enum Arsel {
     /// A snapshot safe to paste into a support ticket — no secrets in it.
     /// Nil before `initialize()`.
     public static func diagnostics() -> ArselDiagnostics? {
-        core?.diagnostics()
+        // A refused start is exactly when an integrator reaches for this, so it
+        // answers with the reason rather than the nil that means "not called yet".
+        if let configError {
+            return ArselDiagnostics(
+                sdkVersion: Wire.sdkVersion,
+                configError: configError,
+                anonymousId: nil,
+                hasAssertedIdentity: false,
+                installationId: nil,
+                hasPushToken: false,
+                pushVendor: nil,
+                hasDeviceSecret: false,
+                optedOut: false,
+                enablementStatus: nil,
+                pendingRequests: 0,
+                lastResponseCode: nil,
+                lastResponsePath: nil,
+                lastResponseAtMs: nil)
+        }
+        return core?.diagnostics()
     }
 
     /// Deliver anything queued now, rather than on the next natural drain.

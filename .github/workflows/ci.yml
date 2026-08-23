@@ -52,6 +52,32 @@ jobs:
       - name: Test
         run: make test
 
+  # The only automated run of the notification-centre delegate and the NSE against a real
+  # notification. `simctl push` injects the payload the way APNs would without reaching Apple,
+  # so this needs no signing key, no device and no Apple Developer membership.
+  push-smoke:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # Run the script rather than `make push-smoke`, so its exit 78 ("could not authorise
+      # notifications on this host") survives: make reports every recipe failure as 2.
+      - name: Push smoke test
+        run: |
+          make push-smoke-install
+          set +e
+          Scripts/push-smoke.sh
+          code=$?
+          set -e
+          if [ "$code" -eq 78 ]; then
+            echo "::warning title=push-smoke skipped::Hosted runners deny simulator TCC writes, so the app could not be granted notification authorisation. The push path was NOT exercised. Run 'make push-smoke' on a Mac to verify it."
+            exit 0
+          fi
+          exit $code
+
   # The integrator-facing surface: Examples/Sample resolves the SDK as a local
   # package, so this compiles what a customer actually links against.
   #

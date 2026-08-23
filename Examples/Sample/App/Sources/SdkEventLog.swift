@@ -24,6 +24,10 @@ final class SdkEventLog: ObservableObject {
 
     func log(_ message: String) {
         let line = "\(formatter.string(from: Date()))  \(message)"
+        // Also to stdout, so `simctl launch --console` can assert on the same timeline the
+        // on-screen log shows. Without this the harness is only observable by a human looking
+        // at the device.
+        print("[harness] \(message)")
         if Thread.isMainThread {
             append(line)
         } else {

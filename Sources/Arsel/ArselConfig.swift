@@ -55,7 +55,11 @@ public struct ArselConfig: Sendable {
         if !clientKey.hasPrefix("pub_") {
             return "clientKey should be the publishable pub_… key — never a secret API key"
         }
-        let localhostHttp = baseUrl.hasPrefix("http://localhost") || baseUrl.hasPrefix("http://127.0.0.1")
+        // Anchored, not a prefix match: `http://localhost.evil.com` satisfies
+        // hasPrefix("http://localhost") and would otherwise be exempted.
+        let localhostHttp = baseUrl.range(
+            of: #"^http://(localhost|127\.0\.0\.1)(:\d+)?(/.*)?$"#,
+            options: .regularExpression) != nil
         if !baseUrl.hasPrefix("https://") && !localhostHttp {
             return "baseUrl must be HTTPS (http is allowed for localhost only)"
         }
@@ -67,6 +71,10 @@ public struct ArselConfig: Sendable {
 /// A point-in-time snapshot safe to paste into a support ticket — no secrets in it.
 public struct ArselDiagnostics: Sendable {
     public let sdkVersion: String
+    /// Why the SDK refused to start, or nil. Set when `initialize` was given an
+    /// invalid configuration: nothing is collected and no call has any effect
+    /// until it is fixed. Same field, same rules, on all three Arsel SDKs.
+    public let configError: String?
     public let anonymousId: String?
     public let hasAssertedIdentity: Bool
     public let installationId: String?

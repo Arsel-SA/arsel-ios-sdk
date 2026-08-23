@@ -255,6 +255,7 @@ final class ArselCore {
             let state = store.current
             return ArselDiagnostics(
                 sdkVersion: Wire.sdkVersion,
+                configError: nil,
                 anonymousId: state.anonymousId,
                 hasAssertedIdentity: state.externalId != nil || state.email != nil || state.phoneNumber != nil,
                 installationId: state.installationId,
