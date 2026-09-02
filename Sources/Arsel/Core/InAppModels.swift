@@ -23,6 +23,31 @@ struct InAppMessage {
     let buttons: [InAppButton]
     /// Present only on FORM and RATING. Never carries a destination key.
     let fields: [InAppField]
+    /// Present only on CUSTOM_HTML.
+    let customHtml: InAppCustomHtml?
+}
+
+/// Author-supplied markup and the terms it is drawn under.
+///
+/// `allowJavaScript` is a capability the renderer withholds, not a request the markup can make:
+/// it decides whether the web view is given script at all, so a creative authored without script
+/// cannot turn script on for itself.
+struct InAppCustomHtml {
+    let source: String
+    let html: String?
+    let url: String?
+    let allowJavaScript: Bool
+    let overlayStyle: String
+}
+
+enum InAppHtmlSource {
+    static let inline = "INLINE"
+    static let url = "URL"
+}
+
+enum InAppOverlayStyle {
+    static let transparent = "TRANSPARENT"
+    static let dark = "DARK"
 }
 
 /// A field as the device sees it.
@@ -89,6 +114,7 @@ enum InAppLayout {
     static let alert = "ALERT"
     static let form = "FORM"
     static let rating = "RATING"
+    static let customHtml = "CUSTOM_HTML"
 
     /// Layouts this build can draw.
     ///
@@ -98,7 +124,7 @@ enum InAppLayout {
     /// surface to detect.
     static let all: Set<String> = [
         modal, bannerTop, bannerBottom, fullscreen, imageOnly,
-        halfInterstitial, alert, form, rating,
+        halfInterstitial, alert, form, rating, customHtml,
     ]
 
     /// Layouts that collect answers and therefore draw inputs.
@@ -106,7 +132,7 @@ enum InAppLayout {
 
     /// Layouts that dim the app behind them. Banners deliberately do not.
     static let scrimmed: Set<String> = [
-        modal, fullscreen, halfInterstitial, alert, form, rating,
+        modal, fullscreen, halfInterstitial, alert, form, rating, customHtml,
     ]
 }
 
@@ -182,6 +208,11 @@ enum InAppParser {
             return nil
         }
 
+        let custom = customHtml(from: json["customHtml"])
+        // Dropped whole, not degraded to a bare headline panel: the author designed markup, and a
+        // stray text modal in its place is a worse outcome than the message not appearing.
+        if layout == InAppLayout.customHtml, custom == nil { return nil }
+
         let trigger = json["trigger"] as? [String: Any] ?? [:]
         let rules = json["displayRules"] as? [String: Any] ?? [:]
 
@@ -206,7 +237,33 @@ enum InAppParser {
             // Absent means "not suppressed"; only an explicit false hides it.
             showCloseButton: content["showCloseButton"] as? Bool ?? true,
             buttons: buttons(from: json["buttons"]),
-            fields: fields(from: json["fields"]))
+            fields: fields(from: json["fields"]),
+            customHtml: custom)
+    }
+
+    /// Nil when the declared source carries no payload, which drops the whole message: an empty
+    /// sandbox still reports a healthy impression, and that is indistinguishable from delivery.
+    private static func customHtml(from raw: Any?) -> InAppCustomHtml? {
+        guard let json = raw as? [String: Any],
+              let source = string(json["source"]),
+              source == InAppHtmlSource.inline || source == InAppHtmlSource.url else {
+            return nil
+        }
+
+        let html = string(json["html"])
+        let url = string(json["url"])
+        if source == InAppHtmlSource.inline, html == nil { return nil }
+        if source == InAppHtmlSource.url, url == nil { return nil }
+
+        return InAppCustomHtml(
+            source: source,
+            html: html,
+            url: url,
+            // Absent means OFF. Anything but an explicit true leaves the web view scriptless.
+            allowJavaScript: json["allowJavaScript"] as? Bool ?? false,
+            overlayStyle: string(json["overlayStyle"]) == InAppOverlayStyle.transparent
+                ? InAppOverlayStyle.transparent
+                : InAppOverlayStyle.dark)
     }
 
     /// An unknown field type is dropped rather than guessed at. Rendering one this build does

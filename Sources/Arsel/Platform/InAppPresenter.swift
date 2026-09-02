@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import Foundation
 import UIKit
+import WebKit
 
 /// Draws an in-app message over whatever the app is currently showing.
 ///
@@ -51,6 +52,10 @@ final class InAppPresenter {
             onSubmit: { [weak self] answers in
                 self?.core?.recordInAppSubmit(message, submission: answers)
             },
+            // A custom-HTML message recording an event of its own. It goes through the same
+            // `track` the host app calls, so it is subject to the same opt-out and the same
+            // queue — a sandboxed page gets no shortcut into the pipeline.
+            onCustomEvent: { [weak self] name in self?.core?.track(name) },
             onDismiss: { [weak self] in self?.close(reportDismiss: true) })
         host.rootViewController = controller
         host.isHidden = false
@@ -116,20 +121,28 @@ private final class InAppViewController: UIViewController {
     private let message: InAppMessage
     private let onButton: (InAppButton) -> Void
     private let onSubmit: ([String: String]) -> Void
+    private let onCustomEvent: (String) -> Void
     private let onDismiss: () -> Void
 
     /// One entry per input, in the order they were drawn. Populated while building the panel.
     private var readers: [FieldReader] = []
 
+    /// Retained for the life of the message: the web view is owned by the sandbox, not by the
+    /// view hierarchy, and dropping it here would tear down the bridge mid-message.
+    private var sandbox: InAppWebSandbox?
+    private var sandboxHeight: NSLayoutConstraint?
+
     init(
         message: InAppMessage,
         onButton: @escaping (InAppButton) -> Void,
         onSubmit: @escaping ([String: String]) -> Void,
+        onCustomEvent: @escaping (String) -> Void,
         onDismiss: @escaping () -> Void
     ) {
         self.message = message
         self.onButton = onButton
         self.onSubmit = onSubmit
+        self.onCustomEvent = onCustomEvent
         self.onDismiss = onDismiss
         super.init(nibName: nil, bundle: nil)
     }
@@ -141,7 +154,10 @@ private final class InAppViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        let scrimmed = InAppLayout.scrimmed.contains(message.layout)
+        var scrimmed = InAppLayout.scrimmed.contains(message.layout)
+        // TRANSPARENT means the app behind stays fully visible, because the author is drawing
+        // their own backdrop inside the markup.
+        if customHtml?.overlayStyle == InAppOverlayStyle.transparent { scrimmed = false }
         view.backgroundColor = scrimmed ? UIColor.black.withAlphaComponent(Self.scrimAlpha) : UIColor.clear
 
         let panel = buildPanel()
@@ -178,8 +194,15 @@ private final class InAppViewController: UIViewController {
         onButton(button)
     }
 
+    /// Non-nil only for a CUSTOM_HTML message that arrived with a usable source.
+    private var customHtml: InAppCustomHtml? {
+        message.layout == InAppLayout.customHtml ? message.customHtml : nil
+    }
+
     private func buildPanel() -> UIView {
-        let panelColor = Self.color(from: message.backgroundColor) ?? .systemBackground
+        let panelColor = customHtml == nil
+            ? (Self.color(from: message.backgroundColor) ?? .systemBackground)
+            : .clear
         let textColor = Self.color(from: message.textColor) ?? Self.contrasting(with: panelColor)
 
         let panel = UIView()
@@ -193,12 +216,18 @@ private final class InAppViewController: UIViewController {
         stack.axis = .vertical
         stack.spacing = Self.spacing
 
+        // The markup owns everything visible, so none of the ordinary content is drawn.
+        if let custom = customHtml {
+            stack.addArrangedSubview(buildSandbox(custom))
+        }
+
         // ALERT is the OS-alert shape: text and actions only, never an image.
-        if let imageUrl = message.imageUrl, !imageUrl.isEmpty, message.layout != InAppLayout.alert {
+        if customHtml == nil, let imageUrl = message.imageUrl, !imageUrl.isEmpty,
+           message.layout != InAppLayout.alert {
             stack.addArrangedSubview(imageView(imageUrl))
         }
 
-        if message.layout != InAppLayout.imageOnly {
+        if customHtml == nil, message.layout != InAppLayout.imageOnly {
             stack.addArrangedSubview(label(message.headline, size: Self.headlineSize, weight: .semibold, color: textColor))
             if !message.body.isEmpty {
                 stack.addArrangedSubview(label(message.body, size: Self.bodySize, weight: .regular, color: textColor))
@@ -214,11 +243,14 @@ private final class InAppViewController: UIViewController {
         }
 
         panel.addSubview(stack)
+        // Custom markup is drawn edge to edge: padding around someone else's design is a border
+        // they did not ask for.
+        let padding = customHtml == nil ? Self.padding : 0
         NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: Self.padding),
-            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: Self.padding),
-            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -Self.padding),
-            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -Self.padding),
+            stack.topAnchor.constraint(equalTo: panel.topAnchor, constant: padding),
+            stack.leadingAnchor.constraint(equalTo: panel.leadingAnchor, constant: padding),
+            stack.trailingAnchor.constraint(equalTo: panel.trailingAnchor, constant: -padding),
+            stack.bottomAnchor.constraint(equalTo: panel.bottomAnchor, constant: -padding),
         ])
 
         if message.showCloseButton {
@@ -232,6 +264,77 @@ private final class InAppViewController: UIViewController {
             ])
         }
         return panel
+    }
+
+    private func buildSandbox(_ custom: InAppCustomHtml) -> UIView {
+        let sandbox = InAppWebSandbox(custom: custom) { [weak self] payload in
+            self?.handleBridge(payload)
+        }
+        self.sandbox = sandbox
+
+        let height =
+            sandbox.webView.heightAnchor.constraint(equalToConstant: Self.defaultSandboxHeight)
+        height.isActive = true
+        sandboxHeight = height
+        return sandbox.webView
+    }
+
+    /// Runs what a custom-HTML message asked for.
+    ///
+    /// Nothing here trusts the payload with more than its own intent. A button is named by id and
+    /// resolved against the CAMPAIGN's own buttons, so the markup can ask for an action the author
+    /// defined but can never invent a destination — the same rule that keeps `fieldKey` off the
+    /// wire for forms.
+    private func handleBridge(_ payload: [String: Any]) {
+        guard let type = payload["type"] as? String else { return }
+        switch type {
+        case Self.bridgeDismiss:
+            onDismiss()
+        case Self.bridgeTrack:
+            let name = (payload["event"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return }
+            onCustomEvent(String(name.prefix(Self.maxBridgeNameCharacters)))
+        case Self.bridgeButton:
+            let id = payload["buttonId"] as? String
+            guard let button = message.buttons.first(where: { $0.buttonId == id }) else { return }
+            onButton(button)
+        case Self.bridgeSubmit:
+            guard let answers = Self.readBridgeSubmission(payload["submission"]) else { return }
+            onSubmit(answers)
+        case Self.bridgeResize:
+            resizeSandbox(payload["height"])
+        default:
+            break
+        }
+    }
+
+    /// Bounded before it reaches the queue. The page is untrusted, so a submission of arbitrary
+    /// size or shape is refused here rather than enqueued and rejected a round trip later.
+    private static func readBridgeSubmission(_ raw: Any?) -> [String: String]? {
+        guard let json = raw as? [String: Any],
+              !json.isEmpty,
+              json.count <= maxBridgeFields else {
+            return nil
+        }
+
+        var answers: [String: String] = [:]
+        for (key, value) in json {
+            guard let answer = value as? String else { return nil }
+            guard !key.isEmpty, key.count <= maxBridgeNameCharacters else { return nil }
+            answers[key] = String(answer.prefix(maxBridgeValueCharacters))
+        }
+        return answers
+    }
+
+    /// Honours a height the markup asks for, clamped.
+    ///
+    /// Without it a custom message is stuck at whatever the layout guessed, because the page's own
+    /// content height is not readable from here. The clamp is what makes obeying it safe: an
+    /// unbounded height is a full-screen overlay the user cannot get past.
+    private func resizeSandbox(_ raw: Any?) {
+        guard let constraint = sandboxHeight, let requested = raw as? Double else { return }
+        let ceiling = view.bounds.height * Self.maxSandboxScreenShare
+        constraint.constant = min(max(CGFloat(requested), Self.minSandboxHeight), ceiling)
     }
 
     private func constrain(_ panel: UIView) {
@@ -497,5 +600,21 @@ private final class InAppViewController: UIViewController {
     private static let bodySize: CGFloat = 15
     private static let closeGlyph = "\u{00D7}"
     private static let closeLabel = "Close"
+
+    private static let bridgeDismiss = "arsel:dismiss"
+    private static let bridgeTrack = "arsel:track"
+    private static let bridgeButton = "arsel:button"
+    private static let bridgeSubmit = "arsel:submit"
+    private static let bridgeResize = "arsel:resize"
+
+    /// Bounds on anything crossing the bridge from untrusted markup.
+    private static let maxBridgeFields = 20
+    private static let maxBridgeNameCharacters = 64
+    private static let maxBridgeValueCharacters = 500
+    private static let defaultSandboxHeight: CGFloat = 320
+    private static let minSandboxHeight: CGFloat = 80
+
+    /// A message may not grow past this share of the screen, whatever it asks for.
+    private static let maxSandboxScreenShare: CGFloat = 0.9
 }
 #endif

@@ -5,6 +5,52 @@ All notable changes to the Arsel iOS SDK.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/): breaking changes to the public API wait for a major release.
 
+## [1.5.0] — 2026-09-02
+
+### Added
+
+- **Custom HTML messages.** The `CUSTOM_HTML` layout renders markup written in the Arsel dashboard
+  instead of a headline, body and buttons. It draws into a `WKWebView` loaded with a **nil base URL**, which gives the page a unique origin with no
+  same-origin access to the app's resources. State is non-persistent, so a creative leaves no
+  cookies or local storage behind, and inline media playback needs a user gesture.
+
+  JavaScript is off unless the campaign's author explicitly enabled it.
+
+  With script on, the creative talks to the SDK over a `WKScriptMessageHandler`, which carries only property-list values — the page can describe
+  an intent but can never name a Swift method, selector or object. It posts
+  `arsel:dismiss`, `arsel:track`, `arsel:button`, `arsel:submit` and `arsel:resize` — and it posts
+  them with `parent.postMessage`, exactly as it would on the web, because the SDK injects a shim
+  that forwards those posts. **One snippet works unchanged on web, iOS and Android.**
+
+  A button is named by id and resolved against the campaign's own buttons, so markup can ask for an
+  action the author defined but can never invent a destination. Submissions are bounded, heights are
+  clamped to 90% of the screen, and a tap that would navigate the sandbox opens in the system
+  browser instead. See the web SDK's `docs/custom-html-messages.md` for the authoring contract.
+
+  The API withholds this layout from any build below 1.5.0.
+
+## [1.4.0] — 2026-09-02
+
+### Added
+
+- **Form and rating messages.** The `FORM` and `RATING` layouts draw inputs — text, email, tel,
+  dropdown, radio, checkbox and a star/NPS rating — and report the answers on a new `submitted`
+  beacon. A required field left empty blocks submission and focuses itself rather than sending a
+  partial answer.
+
+  Answers are keyed by `fieldId`. The bundle deliberately does not carry the destination property,
+  so the SDK cannot name where an answer lands; the API resolves each id against the campaign it
+  stored. Withheld from any build below 1.4.0.
+
+## [1.3.0] — 2026-09-02
+
+### Added
+
+- **Two in-app layouts: `HALF_INTERSTITIAL` and `ALERT`.** The first anchors the panel to the lower
+  half so the app stays partly visible; the second is the compact, centred, text-only alert shape.
+  `ALERT` never draws an image even when the campaign carries one. Withheld from any build below
+  1.3.0, so an older SDK is never offered a layout it cannot draw.
+
 ## [1.2.0] — 2026-09-02
 
 ### Added

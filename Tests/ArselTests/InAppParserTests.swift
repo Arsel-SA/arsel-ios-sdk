@@ -116,6 +116,48 @@ final class InAppParserTests: XCTestCase {
         XCTAssertEqual(InAppParser.millis(from: stamped), nowMs)
     }
 
+    func testReadsACustomHtmlMessage() {
+        let custom = parseCustom("""
+        "source": "INLINE", "html": "<p>hi</p>",
+        "allowJavaScript": true, "overlayStyle": "TRANSPARENT"
+        """)
+
+        XCTAssertEqual(custom?.source, InAppHtmlSource.inline)
+        XCTAssertEqual(custom?.html, "<p>hi</p>")
+        XCTAssertEqual(custom?.allowJavaScript, true)
+        XCTAssertEqual(custom?.overlayStyle, InAppOverlayStyle.transparent)
+    }
+
+    func testLeavesScriptOffUnlessItIsExplicitlyOn() {
+        // The capability is withheld by default: a creative authored without script must never
+        // acquire it from a missing key, a null, or a non-boolean.
+        let absent = parseCustom("\"source\": \"INLINE\", \"html\": \"<p>hi</p>\"")
+        let nulled = parseCustom("""
+        "source": "INLINE", "html": "<p>hi</p>", "allowJavaScript": null
+        """)
+        let stringy = parseCustom("""
+        "source": "INLINE", "html": "<p>hi</p>", "allowJavaScript": "true"
+        """)
+
+        XCTAssertEqual(absent?.allowJavaScript, false)
+        XCTAssertEqual(nulled?.allowJavaScript, false)
+        XCTAssertEqual(stringy?.allowJavaScript, false)
+    }
+
+    func testDropsACustomHtmlMessageWhoseSourceHasNoPayload() {
+        // The whole message goes, not just the payload: the author designed markup, and a stray
+        // text modal in its place is a worse outcome than the message not appearing.
+        XCTAssertNil(parseCustomMessage("\"source\": \"INLINE\", \"url\": \"https://a.test/x\""))
+        XCTAssertNil(parseCustomMessage("\"source\": \"URL\", \"html\": \"<p>hi</p>\""))
+        XCTAssertNil(parseCustomMessage("\"source\": \"MAGIC\", \"html\": \"<p>hi</p>\""))
+    }
+
+    func testCarriesNoCustomHtmlOnAnyOtherLayout() {
+        let parsed = InAppParser.catalogue(from: catalogue(message()), nowMs: nowMs)?.messages.first
+
+        XCTAssertNil(parsed?.customHtml)
+    }
+
     // MARK: Helpers
 
     private func message(_ extra: String = "") -> String {
@@ -124,6 +166,19 @@ final class InAppParserTests: XCTestCase {
         "content": {"headline": "Hi", "body": "There", "showCloseButton": true}
         """
         return "{\(base)\(extra.isEmpty ? "" : ",\(extra)")}"
+    }
+
+    private func parseCustom(_ fields: String) -> InAppCustomHtml? {
+        parseCustomMessage(fields)?.customHtml
+    }
+
+    private func parseCustomMessage(_ fields: String) -> InAppMessage? {
+        let json = """
+        {"campaignId": "c1", "messageId": "m1", "layout": "CUSTOM_HTML",
+         "content": {"headline": "Hi", "showCloseButton": true},
+         "customHtml": {\(fields)}}
+        """
+        return InAppParser.catalogue(from: catalogue(json), nowMs: nowMs)?.messages.first
     }
 
     private func catalogue(_ messages: String) -> Data {

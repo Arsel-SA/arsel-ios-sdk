@@ -4,7 +4,7 @@ import Foundation
 /// When this file and the backend disagree, the backend wins.
 enum Wire {
     /// Bumped per release — and `ExtensionWire.sdkVersion` with it (see RELEASING.md).
-    static let sdkVersion = "1.4.0"
+    static let sdkVersion = "1.5.0"
 
     // MARK: Routes
 
