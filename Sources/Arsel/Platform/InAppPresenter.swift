@@ -55,7 +55,9 @@ final class InAppPresenter {
             // A custom-HTML message recording an event of its own. It goes through the same
             // `track` the host app calls, so it is subject to the same opt-out and the same
             // queue — a sandboxed page gets no shortcut into the pipeline.
-            onCustomEvent: { [weak self] name in self?.core?.track(name) },
+            onCustomEvent: { [weak self] name, properties in
+                self?.core?.track(name, properties: properties)
+            },
             onDismiss: { [weak self] in self?.close(reportDismiss: true) })
         host.rootViewController = controller
         host.isHidden = false
@@ -121,7 +123,7 @@ private final class InAppViewController: UIViewController {
     private let message: InAppMessage
     private let onButton: (InAppButton) -> Void
     private let onSubmit: ([String: String]) -> Void
-    private let onCustomEvent: (String) -> Void
+    private let onCustomEvent: (String, [String: Any]) -> Void
     private let onDismiss: () -> Void
 
     /// One entry per input, in the order they were drawn. Populated while building the panel.
@@ -136,7 +138,7 @@ private final class InAppViewController: UIViewController {
         message: InAppMessage,
         onButton: @escaping (InAppButton) -> Void,
         onSubmit: @escaping ([String: String]) -> Void,
-        onCustomEvent: @escaping (String) -> Void,
+        onCustomEvent: @escaping (String, [String: Any]) -> Void,
         onDismiss: @escaping () -> Void
     ) {
         self.message = message
@@ -293,7 +295,9 @@ private final class InAppViewController: UIViewController {
         case Self.bridgeTrack:
             let name = (payload["event"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !name.isEmpty else { return }
-            onCustomEvent(String(name.prefix(Self.maxBridgeNameCharacters)))
+            onCustomEvent(
+                String(name.prefix(Self.maxBridgeNameCharacters)),
+                Self.readBridgeProperties(payload["properties"]))
         case Self.bridgeButton:
             let id = payload["buttonId"] as? String
             guard let button = message.buttons.first(where: { $0.buttonId == id }) else { return }
@@ -306,6 +310,35 @@ private final class InAppViewController: UIViewController {
         default:
             break
         }
+    }
+
+    /// Properties on a page-authored event, bounded and flattened.
+    ///
+    /// Unlike a submission — refused outright when malformed, because a half-read set of answers
+    /// is worse than none — a bad property is dropped and the event still records. The event is
+    /// the thing being reported, and losing it because one value was an object would hide the
+    /// interaction entirely.
+    ///
+    /// Nested values are not serialised: the queue posts these to an API that types properties as
+    /// primitives, and quietly JSON-encoding an object would put a string where every segment
+    /// reading it expects a number.
+    private static func readBridgeProperties(_ raw: Any?) -> [String: Any] {
+        guard let json = raw as? [String: Any] else { return [:] }
+
+        var properties: [String: Any] = [:]
+        for (key, value) in json {
+            if properties.count >= maxBridgeFields { break }
+            guard !key.isEmpty, key.count <= maxBridgeNameCharacters else { continue }
+
+            // NSNumber bridges both numbers and booleans out of JSONSerialization, so the
+            // string case is the only one needing a length bound.
+            if let text = value as? String {
+                properties[key] = String(text.prefix(maxBridgeValueCharacters))
+            } else if value is NSNumber {
+                properties[key] = value
+            }
+        }
+        return properties
     }
 
     /// Bounded before it reaches the queue. The page is untrusted, so a submission of arbitrary
