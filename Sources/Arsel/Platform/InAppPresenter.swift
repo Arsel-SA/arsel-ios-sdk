@@ -48,6 +48,9 @@ final class InAppPresenter {
         let controller = InAppViewController(
             message: message,
             onButton: { [weak self] button in self?.handle(button, for: message) },
+            onSubmit: { [weak self] answers in
+                self?.core?.recordInAppSubmit(message, submission: answers)
+            },
             onDismiss: { [weak self] in self?.close(reportDismiss: true) })
         host.rootViewController = controller
         host.isHidden = false
@@ -100,20 +103,33 @@ final class InAppPresenter {
     }
 }
 
+/// One input's identity and how to read it. Empty means unanswered, whatever the control.
+private struct FieldReader {
+    let fieldId: String
+    let required: Bool
+    let read: () -> String
+}
+
 /// The message itself. Built in code rather than from a xib, so the package ships no resource
 /// bundle for an integrator to carry.
 private final class InAppViewController: UIViewController {
     private let message: InAppMessage
     private let onButton: (InAppButton) -> Void
+    private let onSubmit: ([String: String]) -> Void
     private let onDismiss: () -> Void
+
+    /// One entry per input, in the order they were drawn. Populated while building the panel.
+    private var readers: [FieldReader] = []
 
     init(
         message: InAppMessage,
         onButton: @escaping (InAppButton) -> Void,
+        onSubmit: @escaping ([String: String]) -> Void,
         onDismiss: @escaping () -> Void
     ) {
         self.message = message
         self.onButton = onButton
+        self.onSubmit = onSubmit
         self.onDismiss = onDismiss
         super.init(nibName: nil, bundle: nil)
     }
@@ -125,7 +141,7 @@ private final class InAppViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        let scrimmed = message.layout == InAppLayout.modal || message.layout == InAppLayout.fullscreen
+        let scrimmed = InAppLayout.scrimmed.contains(message.layout)
         view.backgroundColor = scrimmed ? UIColor.black.withAlphaComponent(Self.scrimAlpha) : UIColor.clear
 
         let panel = buildPanel()
@@ -150,7 +166,16 @@ private final class InAppViewController: UIViewController {
 
     @objc private func buttonTapped(_ sender: UIButton) {
         guard sender.tag >= 0, sender.tag < message.buttons.count else { return }
-        onButton(message.buttons[sender.tag])
+        let button = message.buttons[sender.tag]
+
+        // A form's non-dismiss button submits. Answers are read before the controller tears the
+        // view down, and a failed validation aborts the tap entirely so the message stays open
+        // with the problem visible.
+        if !readers.isEmpty && button.action != InAppAction.dismiss {
+            guard let answers = readAnswers() else { return }
+            onSubmit(answers)
+        }
+        onButton(button)
     }
 
     private func buildPanel() -> UIView {
@@ -161,12 +186,17 @@ private final class InAppViewController: UIViewController {
         panel.translatesAutoresizingMaskIntoConstraints = false
         panel.backgroundColor = panelColor
         panel.layer.cornerRadius = Self.cornerRadius
-        panel.accessibilityViewIsModal = message.layout == InAppLayout.modal
+        panel.accessibilityViewIsModal = InAppLayout.scrimmed.contains(message.layout)
 
         let stack = UIStackView()
         stack.translatesAutoresizingMaskIntoConstraints = false
         stack.axis = .vertical
         stack.spacing = Self.spacing
+
+        // ALERT is the OS-alert shape: text and actions only, never an image.
+        if let imageUrl = message.imageUrl, !imageUrl.isEmpty, message.layout != InAppLayout.alert {
+            stack.addArrangedSubview(imageView(imageUrl))
+        }
 
         if message.layout != InAppLayout.imageOnly {
             stack.addArrangedSubview(label(message.headline, size: Self.headlineSize, weight: .semibold, color: textColor))
@@ -174,6 +204,11 @@ private final class InAppViewController: UIViewController {
                 stack.addArrangedSubview(label(message.body, size: Self.bodySize, weight: .regular, color: textColor))
             }
         }
+
+        if InAppLayout.inputs.contains(message.layout) && !message.fields.isEmpty {
+            stack.addArrangedSubview(fieldStack(textColor: textColor))
+        }
+
         if !message.buttons.isEmpty {
             stack.addArrangedSubview(buttonRow())
         }
@@ -210,6 +245,11 @@ private final class InAppViewController: UIViewController {
             constraints.append(panel.topAnchor.constraint(equalTo: guide.topAnchor, constant: Self.margin))
         case InAppLayout.bannerBottom:
             constraints.append(panel.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -Self.margin))
+        case InAppLayout.halfInterstitial:
+            // Anchored to the bottom so the app stays visible above it, which is the whole point
+            // of a half interstitial.
+            constraints.append(panel.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -Self.margin))
+            constraints.append(panel.heightAnchor.constraint(lessThanOrEqualTo: guide.heightAnchor, multiplier: Self.halfHeightFraction))
         case InAppLayout.fullscreen:
             constraints.append(panel.topAnchor.constraint(equalTo: guide.topAnchor, constant: Self.margin))
             constraints.append(panel.bottomAnchor.constraint(equalTo: guide.bottomAnchor, constant: -Self.margin))
@@ -228,6 +268,169 @@ private final class InAppViewController: UIViewController {
         view.font = .systemFont(ofSize: size, weight: weight)
         view.numberOfLines = 0
         return view
+    }
+
+    /// An image view that fills in once the data arrives.
+    ///
+    /// Loaded off the main queue and applied back on it. A failed load removes the view and KEEPS
+    /// the message — the headline and buttons still carry it, and a blank rectangle reads as a
+    /// product bug in a way that "no image" does not.
+    private func imageView(_ urlString: String) -> UIImageView {
+        let view = UIImageView()
+        view.contentMode = .scaleAspectFit
+        view.clipsToBounds = true
+        view.heightAnchor.constraint(lessThanOrEqualToConstant: Self.maxImageHeight).isActive = true
+        // Hidden until it has something to draw, so a slow network never leaves a gap the text
+        // then jumps past when it fills.
+        view.isHidden = true
+
+        guard let url = URL(string: urlString), url.scheme?.lowercased() == "https" else {
+            return view
+        }
+
+        let task = URLSession.shared.dataTask(with: url) { [weak view] data, _, _ in
+            guard let data = data, let image = UIImage(data: data) else {
+                DispatchQueue.main.async { view?.removeFromSuperview() }
+                return
+            }
+            DispatchQueue.main.async {
+                view?.image = image
+                view?.isHidden = false
+            }
+        }
+        task.resume()
+        return view
+    }
+
+    /// Draws the message's inputs and records how to read each one.
+    ///
+    /// Answers are keyed by `fieldId`; this SDK never receives a destination, so it cannot send
+    /// one. The server resolves each id against the campaign it stored.
+    private func fieldStack(textColor: UIColor) -> UIStackView {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = Self.spacing
+
+        for field in message.fields {
+            if field.type != InAppFieldType.checkbox {
+                let caption = field.required ? "\(field.label) *" : field.label
+                stack.addArrangedSubview(label(caption, size: Self.bodySize, weight: .medium, color: textColor))
+            }
+            stack.addArrangedSubview(control(for: field, textColor: textColor))
+        }
+        return stack
+    }
+
+    private func control(for field: InAppField, textColor: UIColor) -> UIView {
+        switch field.type {
+        case InAppFieldType.rating:
+            return ratingControl(field)
+        case InAppFieldType.checkbox:
+            return checkboxControl(field, textColor: textColor)
+        case InAppFieldType.dropdown, InAppFieldType.radio:
+            return choiceControl(field, textColor: textColor)
+        default:
+            return textControl(field, textColor: textColor)
+        }
+    }
+
+    /// A segmented control rather than tappable labels: it is a single-choice control, and the
+    /// native widget brings the accessibility behaviour a custom view would have to reimplement.
+    private func ratingControl(_ field: InAppField) -> UIView {
+        let scale = (field.scale ?? inAppDefaultRatingScale) > 1
+            ? (field.scale ?? inAppDefaultRatingScale)
+            : inAppDefaultRatingScale
+        // Stars up to five, numerals beyond: a ten-star row is unreadable at the width a message
+        // gets, and NPS is conventionally numeric anyway.
+        let titles = (1...scale).map { scale <= inAppDefaultRatingScale ? "★" : "\($0)" }
+        let control = UISegmentedControl(items: titles)
+        control.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minTapTarget).isActive = true
+
+        readers.append(FieldReader(fieldId: field.fieldId, required: field.required) { [weak control] in
+            guard let index = control?.selectedSegmentIndex, index != UISegmentedControl.noSegment else {
+                return ""
+            }
+            return "\(index + 1)"
+        })
+        return control
+    }
+
+    private func textControl(_ field: InAppField, textColor: UIColor) -> UIView {
+        let input = UITextField()
+        input.borderStyle = .roundedRect
+        input.textColor = textColor
+        input.placeholder = field.placeholder
+        input.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minTapTarget).isActive = true
+        switch field.type {
+        case InAppFieldType.email:
+            input.keyboardType = .emailAddress
+            input.autocapitalizationType = .none
+        case InAppFieldType.tel:
+            input.keyboardType = .phonePad
+        default:
+            break
+        }
+
+        readers.append(FieldReader(fieldId: field.fieldId, required: field.required) { [weak input] in
+            (input?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        })
+        return input
+    }
+
+    private func checkboxControl(_ field: InAppField, textColor: UIColor) -> UIView {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.spacing = Self.spacing
+        row.alignment = .center
+
+        let toggle = UISwitch()
+        let caption = field.required ? "\(field.label) *" : field.label
+        row.addArrangedSubview(toggle)
+        row.addArrangedSubview(label(caption, size: Self.bodySize, weight: .regular, color: textColor))
+
+        readers.append(FieldReader(fieldId: field.fieldId, required: field.required) { [weak toggle] in
+            // A required checkbox must be on, so an off one reads as empty rather than as
+            // "false" — otherwise a consent switch would pass validation while recording a refusal.
+            guard let isOn = toggle?.isOn else { return "" }
+            if isOn { return "true" }
+            return field.required ? "" : "false"
+        })
+        return row
+    }
+
+    /// Dropdown and radio collapse to the same control on iOS: a segmented row of the offered
+    /// options, which is the platform-native way to pick one of a short list.
+    private func choiceControl(_ field: InAppField, textColor: UIColor) -> UIView {
+        let control = UISegmentedControl(items: field.options.map { $0.label })
+        control.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.minTapTarget).isActive = true
+
+        let values = field.options.map { $0.value }
+        readers.append(FieldReader(fieldId: field.fieldId, required: field.required) { [weak control] in
+            guard let index = control?.selectedSegmentIndex,
+                  index != UISegmentedControl.noSegment,
+                  index < values.count else {
+                return ""
+            }
+            return values[index]
+        })
+        return control
+    }
+
+    /// Nil when a required field is unanswered — the caller aborts the tap rather than sending a
+    /// partial answer.
+    private func readAnswers() -> [String: String]? {
+        var answers: [String: String] = [:]
+        var missing = false
+
+        for reader in readers {
+            let value = reader.read()
+            if value.isEmpty {
+                if reader.required { missing = true }
+                continue
+            }
+            answers[reader.fieldId] = value
+        }
+        return missing ? nil : answers
     }
 
     private func buttonRow() -> UIStackView {
@@ -287,6 +490,9 @@ private final class InAppViewController: UIViewController {
 
     /// Apple's minimum touch target; anything smaller fails an accessibility audit.
     private static let minTapTarget: CGFloat = 44
+    private static let maxImageHeight: CGFloat = 220
+    /// A half interstitial may take at most this much of the screen.
+    private static let halfHeightFraction: CGFloat = 0.6
     private static let headlineSize: CGFloat = 18
     private static let bodySize: CGFloat = 15
     private static let closeGlyph = "\u{00D7}"

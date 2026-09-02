@@ -21,6 +21,28 @@ struct InAppMessage {
     let textColor: String?
     let showCloseButton: Bool
     let buttons: [InAppButton]
+    /// Present only on FORM and RATING. Never carries a destination key.
+    let fields: [InAppField]
+}
+
+/// A field as the device sees it.
+///
+/// `fieldKey` — where the answer is stored — is deliberately absent from the wire, so this SDK
+/// cannot name a destination. Answers are reported against `fieldId` and the server resolves the
+/// rest against the campaign it holds.
+struct InAppField {
+    let fieldId: String
+    let type: String
+    let label: String
+    let required: Bool
+    let placeholder: String?
+    let options: [InAppFieldOption]
+    let scale: Int?
+}
+
+struct InAppFieldOption {
+    let label: String
+    let value: String
 }
 
 struct InAppButton {
@@ -63,10 +85,45 @@ enum InAppLayout {
     static let bannerBottom = "BANNER_BOTTOM"
     static let fullscreen = "FULLSCREEN"
     static let imageOnly = "IMAGE_ONLY"
+    static let halfInterstitial = "HALF_INTERSTITIAL"
+    static let alert = "ALERT"
+    static let form = "FORM"
+    static let rating = "RATING"
 
-    /// iOS draws all five; only web excludes fullscreen.
-    static let all: Set<String> = [modal, bannerTop, bannerBottom, fullscreen, imageOnly]
+    /// Layouts this build can draw.
+    ///
+    /// The client half of the server's `IN_APP_SUPPORTED_LAYOUTS`; the two have to be extended
+    /// together. The server gates on the version this SDK reports, but a build handed a layout
+    /// missing from this set drops the message silently — the one failure this channel has no
+    /// surface to detect.
+    static let all: Set<String> = [
+        modal, bannerTop, bannerBottom, fullscreen, imageOnly,
+        halfInterstitial, alert, form, rating,
+    ]
+
+    /// Layouts that collect answers and therefore draw inputs.
+    static let inputs: Set<String> = [form, rating]
+
+    /// Layouts that dim the app behind them. Banners deliberately do not.
+    static let scrimmed: Set<String> = [
+        modal, fullscreen, halfInterstitial, alert, form, rating,
+    ]
 }
+
+enum InAppFieldType {
+    static let text = "text"
+    static let email = "email"
+    static let tel = "tel"
+    static let dropdown = "dropdown"
+    static let radio = "radio"
+    static let checkbox = "checkbox"
+    static let rating = "rating"
+
+    static let all: Set<String> = [text, email, tel, dropdown, radio, checkbox, rating]
+}
+
+/// Matches DEFAULT_IN_APP_RATING_SCALE on the server.
+let inAppDefaultRatingScale = 5
 
 enum InAppAction {
     static let deepLink = "DEEP_LINK"
@@ -80,6 +137,7 @@ enum InAppBeacon {
     static let clicked = "clicked"
     static let dismissed = "dismissed"
     static let expired = "expired"
+    static let submitted = "submitted"
 }
 
 /// Parses the catalogue.
@@ -147,7 +205,42 @@ enum InAppParser {
             textColor: string(content["textColor"]),
             // Absent means "not suppressed"; only an explicit false hides it.
             showCloseButton: content["showCloseButton"] as? Bool ?? true,
-            buttons: buttons(from: json["buttons"]))
+            buttons: buttons(from: json["buttons"]),
+            fields: fields(from: json["fields"]))
+    }
+
+    /// An unknown field type is dropped rather than guessed at. Rendering one this build does
+    /// not understand as a text box would collect an answer the server then refuses, which reads
+    /// to the user as the form being broken.
+    private static func fields(from raw: Any?) -> [InAppField] {
+        guard let array = raw as? [[String: Any]] else { return [] }
+        return array.compactMap { item in
+            guard let fieldId = string(item["fieldId"]),
+                  let label = string(item["label"]),
+                  let type = string(item["type"]),
+                  InAppFieldType.all.contains(type) else {
+                return nil
+            }
+            return InAppField(
+                fieldId: fieldId,
+                type: type,
+                label: label,
+                required: item["required"] as? Bool ?? false,
+                placeholder: string(item["placeholder"]),
+                options: fieldOptions(from: item["options"]),
+                scale: item["scale"] as? Int)
+        }
+    }
+
+    private static func fieldOptions(from raw: Any?) -> [InAppFieldOption] {
+        guard let array = raw as? [[String: Any]] else { return [] }
+        return array.compactMap { item in
+            guard let label = string(item["label"]),
+                  let value = string(item["value"]) else {
+                return nil
+            }
+            return InAppFieldOption(label: label, value: value)
+        }
     }
 
     private static func buttons(from raw: Any?) -> [InAppButton] {

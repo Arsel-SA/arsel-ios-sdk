@@ -260,6 +260,15 @@ final class InAppController {
         enqueueBeacon(message, event: InAppBeacon.clicked, extra: ["buttonId": buttonId])
     }
 
+    /// Answers are keyed by `fieldId`, never by a destination.
+    ///
+    /// The catalogue does not carry `fieldKey` at all, so this SDK could not name where an
+    /// answer lands even if it wanted to — the server resolves each id against the campaign.
+    func recordSubmit(_ message: InAppMessage, submission: [String: String]) {
+        guard !submission.isEmpty else { return }
+        enqueueBeacon(message, event: InAppBeacon.submitted, extra: ["submission": submission])
+    }
+
     func recordDismiss(_ message: InAppMessage, visibleSeconds: Int64) {
         let clamped = min(max(visibleSeconds, 0), Self.maxVisibleSeconds)
         enqueueBeacon(message, event: InAppBeacon.dismissed, extra: ["visibleSeconds": clamped])

@@ -251,6 +251,10 @@ final class ArselCore {
         serial.async { self.inApp.recordClick(message, buttonId: buttonId) }
     }
 
+    func recordInAppSubmit(_ message: InAppMessage, submission: [String: String]) {
+        serial.async { self.inApp.recordSubmit(message, submission: submission) }
+    }
+
     func recordInAppDismiss(_ message: InAppMessage, visibleSeconds: Int64) {
         serial.async { self.inApp.recordDismiss(message, visibleSeconds: visibleSeconds) }
     }
