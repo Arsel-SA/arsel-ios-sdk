@@ -5,7 +5,18 @@ All notable changes to the Arsel iOS SDK.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/): breaking changes to the public API wait for a major release.
 
-## [Unreleased]
+## [1.2.0] — 2026-09-02
+
+### Added
+
+- **`arsel.app_installed`.** Emitted once, on the first launch after the app is installed, ahead of
+  that launch's `arsel.session_start`. Carries `app_version`, `sdk_version` and `platform`. Its flag
+  lives beside the rest of the SDK's state, which the OS deletes with the app, so a reinstall counts
+  again while `reset()` and `optOut()` do not.
+
+  **Devices that already have your app get no install event when they update to this version.** They
+  are seeded silently on their first launch: emitting would have reported the entire installed base
+  as installs on the day you shipped. Install-based segments start empty and fill forward.
 
 ## [1.1.0] — 2026-08-23
 

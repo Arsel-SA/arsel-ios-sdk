@@ -45,6 +45,24 @@ numbers and booleans pass through; `Date` becomes an ISO-8601 UTC string; non-fi
 everything else are stringified; nesting is capped at depth 8 and ~64 KB serialized. Needs no push
 token, no permission, no registration.
 
+### Reserved events
+
+The SDK emits these itself; `track()` cannot create or overwrite them.
+
+| Event | When | Properties |
+| --- | --- | --- |
+| `arsel.app_installed` | the first launch after the app is installed | `app_version`, `sdk_version`, `platform` |
+| `arsel.session_start` | the app comes to the foreground, cold or after 30+ minutes away | — |
+| `arsel.session_end` | discovered on the **next** foreground, backdated to when the app left | `duration_seconds` |
+| `arsel.identify` | `identify()` supplied at least one identifier | — |
+| `arsel.screen_view` | `screen()` was called | `screen_name`, plus whatever you passed |
+
+`arsel.app_installed` fires ahead of that launch's `arsel.session_start`, and its flag lives in the
+state file iOS deletes with the app — so a reinstall counts again, while `reset()` and `optOut()` do
+not. Devices already running an older SDK are seeded silently and never emit one, so install-based
+segments start empty and fill forward rather than reporting the installed base as installs on
+release day.
+
 ## `identify(externalId:email:phoneNumber:)`
 
 ```swift

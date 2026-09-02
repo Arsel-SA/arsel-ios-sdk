@@ -12,6 +12,7 @@ enum EventBodies {
     static let sessionStart = "\(reservedPrefix)session_start"
     static let sessionEnd = "\(reservedPrefix)session_end"
     static let identify = "\(reservedPrefix)identify"
+    static let appInstalled = "\(reservedPrefix)app_installed"
 
     static let maxDataDepth = 8
     static let maxDataBytes = 64 * 1024

@@ -47,6 +47,10 @@ struct DeviceSnapshot {
     var deviceLocale: String?
     var enablementStatus: String?
 
+    static var appVersion: String? {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+    }
+
     static func capture() -> DeviceSnapshot {
         var systemInfo = utsname()
         uname(&systemInfo)
@@ -54,9 +58,8 @@ struct DeviceSnapshot {
             String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
         }
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        let bundle = Bundle.main.infoDictionary
         return DeviceSnapshot(
-            appVersion: bundle?["CFBundleShortVersionString"] as? String,
+            appVersion: Self.appVersion,
             osVersion: "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
             deviceModel: model.isEmpty ? nil : model,
             deviceTimezone: TimeZone.current.identifier,

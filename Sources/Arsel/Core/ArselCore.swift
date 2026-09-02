@@ -18,6 +18,8 @@ final class ArselCore {
     private let drainer: Drainer
     let events: EventController
     let sessions: SessionTracker
+    let installs: InstallTracker
+    private let alreadyInstalled: Bool
     let push: PushController
     let inApp: InAppController
 
@@ -40,6 +42,10 @@ final class ArselCore {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         self.config = config
         self.store = StateStore(directory: directory, log: log)
+        // Before anything can mint: `mirrorExtensionContext()` below creates the installation id
+        // whenever an App Group is configured.
+        self.alreadyInstalled =
+            store.current.anonymousId != nil || store.current.installationId != nil
         #if canImport(Security)
         self.secrets = secrets ?? KeychainSecretStore(accessGroup: config.keychainAccessGroup)
         #else
@@ -69,6 +75,7 @@ final class ArselCore {
         self.push = PushController(
             store: store, enqueue: enqueueRef, log: log, clock: clock, deviceSnapshot: deviceSnapshot)
         self.sessions = SessionTracker(store: store, events: events, clock: clock)
+        self.installs = InstallTracker(store: store, events: events)
 
         let storeRef = store
         let clientKey = config.clientKey
@@ -192,6 +199,12 @@ final class ArselCore {
 
     func engagement(_ record: EngagementRecord) {
         serial.async { self.push.engagement(record) }
+    }
+
+    /// Ahead of the first session, so the install leads the timeline — guaranteed by FIFO on the
+    /// serial queue, since no foreground notification can arrive before `Arsel.initialize` returns.
+    func reportInstall() {
+        serial.async { self.installs.reportIfNew(alreadyInstalled: self.alreadyInstalled) }
     }
 
     func onForeground() {

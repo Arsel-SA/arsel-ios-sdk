@@ -35,6 +35,7 @@ public enum Arsel {
         configError = nil
         let instance = ArselCore(config: config, directory: ArselCore.defaultDirectory())
         core = instance
+        instance.reportInstall()
         attachInAppPresenter(instance)
         attachLifecycleObservers()
         refreshPermissionState()

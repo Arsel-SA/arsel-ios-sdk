@@ -18,6 +18,8 @@ struct PersistedState: Codable {
     /// device is never re-reported.
     var lastRegisteredFingerprint: String?
     var enablementStatus: String?
+    /// Absent in state files written by older SDKs, which decode to `false`.
+    var installReported: Bool = false
     var sessionStartedAtMs: Int64 = 0
     var backgroundedAtMs: Int64 = 0
     // Diagnostics only; nothing branches on these.
