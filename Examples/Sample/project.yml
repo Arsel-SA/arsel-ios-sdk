@@ -23,7 +23,7 @@ configFiles:
 #
 # To test against a released tag exactly as an integrator would, swap this for:
 #   arsel-ios-sdk:
-#     url: https://github.com/BasicsEngage/arsel-ios-sdk.git
+#     url: https://github.com/Arsel-SA/arsel-ios-sdk.git
 #     from: 1.0.0
 packages:
   arsel-ios-sdk:

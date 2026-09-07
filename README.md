@@ -56,7 +56,7 @@ notifications still has a contact and a behavioural history. Only delivery needs
 Xcode → *File → Add Package Dependencies…* → this repository's URL. Or in `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/BasicsEngage/arsel-ios-sdk.git", from: "1.0.0")
+.package(url: "https://github.com/Arsel-SA/arsel-ios-sdk.git", from: "1.0.0")
 ```
 
 Two products:

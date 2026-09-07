@@ -5,8 +5,8 @@ back through the SDK's own public surface (`diagnostics()`, `Arsel.anonymousId`)
 see is exactly what an integrator can see in the field.
 
 Companion docs: the SDK's
-[quickstart](https://github.com/BasicsEngage/arsel-ios-sdk/blob/main/docs/quickstart.md) and
-[push-notifications guide](https://github.com/BasicsEngage/arsel-ios-sdk/blob/main/docs/push-notifications.md).
+[quickstart](https://github.com/Arsel-SA/arsel-ios-sdk/blob/main/docs/quickstart.md) and
+[push-notifications guide](https://github.com/Arsel-SA/arsel-ios-sdk/blob/main/docs/push-notifications.md).
 
 ---
 

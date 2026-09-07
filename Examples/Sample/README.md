@@ -1,9 +1,9 @@
 # Arsel Push — iOS Sample / Test App
 
 A standalone iOS app (its **own repo**) that consumes the
-**[Arsel iOS SDK](https://github.com/BasicsEngage/arsel-ios-sdk)** exactly the way a real
+**[Arsel iOS SDK](https://github.com/Arsel-SA/arsel-ios-sdk)** exactly the way a real
 integrator would. This is the test sandbox — no production app required. The iOS counterpart of
-[android-sample-push-app](https://github.com/BasicsEngage/android-sample-push-app).
+[android-sample-push-app](https://github.com/Arsel-SA/android-sample-push-app).
 
 > Contains no SDK source. It links the `Arsel` and `ArselNotificationExtension` SPM products, so
 > it sees exactly what a customer sees.
