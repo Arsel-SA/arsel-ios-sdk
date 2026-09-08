@@ -5,9 +5,27 @@ All notable changes to the Arsel iOS SDK.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/): breaking changes to the public API wait for a major release.
 
-## [1.5.0] — 2026-09-02
+## [Unreleased]
+
+## [1.3.0] — 2026-09-08
 
 ### Added
+
+- **Images in in-app messages.** The presenter loads a message's image off the main queue and draws
+  it above the headline, which is what `IMAGE_ONLY` had always needed and never had. The URL must
+  be `https`. The view stays hidden until it has something to draw, so a slow network never leaves
+  a gap the text then jumps past, and a failed load removes the view and keeps the message — a
+  blank rectangle reads as a product bug in a way that "no image" does not.
+
+- **Four in-app layouts: `HALF_INTERSTITIAL`, `ALERT`, `FORM` and `RATING`.** The first anchors the
+  panel to the lower half so the app stays partly visible; the second is the compact, centred,
+  text-only alert shape, and never draws an image even when the campaign carries one.
+
+  `FORM` and `RATING` draw inputs — text, email, tel, dropdown, radio, checkbox and a star/NPS
+  rating — and report the answers on a new `submitted` beacon. A required field left empty blocks
+  submission and focuses itself rather than sending a partial answer. Answers are keyed by
+  `fieldId`. The bundle deliberately does not carry the destination property, so the SDK cannot
+  name where an answer lands; the API resolves each id against the campaign it stored.
 
 - **Custom HTML messages.** The `CUSTOM_HTML` layout renders markup written in the Arsel dashboard
   instead of a headline, body and buttons. It draws into a `WKWebView` loaded with a **nil base URL**, which gives the page a unique origin with no
@@ -27,29 +45,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
   clamped to 90% of the screen, and a tap that would navigate the sandbox opens in the system
   browser instead. See the web SDK's `docs/custom-html-messages.md` for the authoring contract.
 
-  The API withholds this layout from any build below 1.5.0.
+- **`arsel:track` from a custom-HTML creative carries properties.** They ride the same `track()`
+  the host app uses. Keys and values are bounded, and a value that is not a string, finite number
+  or boolean is dropped rather than serialised — the API types properties as primitives. A
+  malformed property never costs you the event.
 
-## [1.4.0] — 2026-09-02
+  Every layout above is withheld by the API from any build below 1.3.0, so an older SDK is never
+  offered a layout it cannot draw and nothing has to be released in lockstep.
 
-### Added
+### Fixed
 
-- **Form and rating messages.** The `FORM` and `RATING` layouts draw inputs — text, email, tel,
-  dropdown, radio, checkbox and a star/NPS rating — and report the answers on a new `submitted`
-  beacon. A required field left empty blocks submission and focuses itself rather than sending a
-  partial answer.
-
-  Answers are keyed by `fieldId`. The bundle deliberately does not carry the destination property,
-  so the SDK cannot name where an answer lands; the API resolves each id against the campaign it
-  stored. Withheld from any build below 1.4.0.
-
-## [1.3.0] — 2026-09-02
-
-### Added
-
-- **Two in-app layouts: `HALF_INTERSTITIAL` and `ALERT`.** The first anchors the panel to the lower
-  half so the app stays partly visible; the second is the compact, centred, text-only alert shape.
-  `ALERT` never draws an image even when the campaign carries one. Withheld from any build below
-  1.3.0, so an older SDK is never offered a layout it cannot draw.
+- **Jittered retry backoff.** The curve (5s, doubling, capped at 5 minutes) and `Retry-After` were
+  already honoured, but both were exact — so every device that regained connectivity or foregrounded
+  at the same moment retried on the same schedule, and a fleet rate-limited inside one window
+  received an identical `Retry-After` and returned in lockstep. Waits now carry up to 50% jitter,
+  never below the server's stated floor. Extracted as `RetryPolicy`, mirroring the web and Android
+  SDKs.
 
 ## [1.2.0] — 2026-09-02
 

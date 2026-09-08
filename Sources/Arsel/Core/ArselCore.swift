@@ -327,17 +327,15 @@ final class ArselCore {
             retryNotBeforeMs = 0
         case .retryLater(let retryAfterMs):
             consecutiveFailures += 1
-            let backoffMs = min(Self.baseBackoffMs << min(consecutiveFailures - 1, 6), Self.maxBackoffMs)
-            let waitMs = max(retryAfterMs ?? 0, backoffMs)
+            let waitMs = RetryPolicy.backoffMs(
+                attempt: consecutiveFailures,
+                retryAfterMs: retryAfterMs)
             retryNotBeforeMs = clock() + waitMs
             serial.asyncAfter(deadline: .now() + .milliseconds(Int(waitMs))) {
                 self.drainOnce(force: false)
             }
         }
     }
-
-    private static let baseBackoffMs: Int64 = 5_000
-    private static let maxBackoffMs: Int64 = 5 * 60_000
 
     // MARK: Extension context
 

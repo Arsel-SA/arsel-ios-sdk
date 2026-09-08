@@ -6,6 +6,11 @@ iOS-simulator build), then a GitHub Release with the matching CHANGELOG section 
 
 ## Per release
 
+These steps are **one commit, and that commit is the release** — never bump the version in a feature
+commit. An untagged bump publishes nothing while burning the number: the API's per-layout SDK gate
+then withholds layouts from a build that does not exist, and the feature stays dark in the field
+even though the code is on `main`.
+
 1. Retitle the changes in `CHANGELOG.md` as `## [X.Y.Z] — YYYY-MM-DD` — the workflow extracts this
    section and fails if it is missing.
 2. Bump the SDK version in **both** places, or the `X-Arsel-SDK` header reports a stale build:
